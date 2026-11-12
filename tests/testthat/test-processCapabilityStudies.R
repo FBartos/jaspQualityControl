@@ -4669,3 +4669,65 @@ test_that("WF interleaved stages - x-bar chart test results use the flagged subg
   table <- results[["results"]][["xBar"]][["collection"]][["xBar_tableXBar"]][["data"]]
   jaspTools::expect_equal_tables(table, list("B", "Point 8 (R4)"))
 })
+
+# Non-normal capability: PpL stays finite when LSL lies far in a tail of the fitted distribution ####
+# Each LSL lies about 10 SDs (normal equivalent) from the fitted distribution's centre, where one of P(X < LSL) and P(X >= LSL)
+# rounds to 1: above the process (whole process below LSL) for the first eight cases, below it for the last case.
+# Reference: Z_LSL with pnorm(Z_LSL) = P(X < LSL) from the smaller tail, PpL = -Z_LSL/3 = Ppk (LSL only),
+# evaluated at the fitted parameters reported in the summary table.
+farLslCases <- list(
+  list(distribution = "lognormal",           x = qlnorm(ppoints(100), meanlog = 2, sdlog = 0.2),          lsl = 60),
+  list(distribution = "weibull",             x = qweibull(ppoints(100), shape = 5, scale = 8),            lsl = 18),
+  list(distribution = "3ParameterLognormal", x = 5 + qlnorm(ppoints(100), meanlog = 1, sdlog = 0.3),      lsl = 70),
+  list(distribution = "3ParameterWeibull",   x = 5 + qweibull(ppoints(100), shape = 2, scale = 3),        lsl = 27),
+  list(distribution = "gamma",               x = qgamma(ppoints(100), shape = 25, scale = 0.3),           lsl = 30),
+  list(distribution = "exponential",         x = qexp(ppoints(100), rate = 1/2),                          lsl = 110),
+  list(distribution = "logistic",            x = qlogis(ppoints(100), location = 7.5, scale = 0.5),       lsl = 35),
+  list(distribution = "loglogistic",         x = flexsurv::qllogis(ppoints(100), shape = 8, scale = 7.4), lsl = 7000),
+  list(distribution = "lognormal",           x = qlnorm(ppoints(100), meanlog = 2, sdlog = 0.2),          lsl = 1)
+)
+farLslCdf <- function(distribution, q, beta, theta, threshold, lower.tail) {
+  switch(distribution,
+         lognormal             = plnorm(q, meanlog = beta, sdlog = theta, lower.tail = lower.tail),
+         weibull               = pweibull(q, shape = beta, scale = theta, lower.tail = lower.tail),
+         "3ParameterLognormal" = plnorm(q - threshold, meanlog = beta, sdlog = theta, lower.tail = lower.tail),
+         "3ParameterWeibull"   = pweibull(q - threshold, shape = beta, scale = theta, lower.tail = lower.tail),
+         gamma                 = pgamma(q, shape = beta, scale = theta, lower.tail = lower.tail),
+         exponential           = pexp(q, rate = 1/theta, lower.tail = lower.tail),
+         logistic              = plogis(q, location = beta, scale = theta, lower.tail = lower.tail),
+         loglogistic           = flexsurv::pllogis(q, shape = 1/theta, scale = exp(beta), lower.tail = lower.tail))
+}
+for (farLslCase in farLslCases) {
+  distribution <- farLslCase$distribution
+  options <- analysisOptions("processCapabilityStudies")
+  options$testSet <- "jaspDefault"
+  options$measurementLongFormat <- "x"
+  options$subgroupSizeType <- "manual"
+  options$manualSubgroupSizeValue <- 5
+  options$probabilityPlotRankMethod <- "bernard"
+  options$controlChartType <- "xBarR"
+  options$capabilityStudyType <- "nonNormalCapabilityAnalysis"
+  options$nonNormalDistribution <- distribution
+  options$nullDistribution <- if (distribution %in% c("lognormal", "weibull", "3ParameterLognormal", "3ParameterWeibull")) distribution else "normal"
+  options$nonNormalMethod <- "nonConformance"
+  options$lowerSpecificationLimit <- TRUE
+  options$upperSpecificationLimit <- FALSE
+  options$lowerSpecificationLimitValue <- farLslCase$lsl
+  set.seed(1)
+  results <- runAnalysis("processCapabilityStudies", data.frame(x = farLslCase$x), options)
+
+  test_that(sprintf("(%s, LSL = %s) PpL is finite when LSL lies far in a tail", distribution, farLslCase$lsl), {
+    nonNormalContainer <- results[["results"]][["capabilityAnalysis"]][["collection"]][["capabilityAnalysis_nonNormalCapabilityAnalysis"]][["collection"]]
+    fit         <- nonNormalContainer[["capabilityAnalysis_nonNormalCapabilityAnalysis_summaryTableNonNormal"]][["data"]][[1]]
+    performance <- nonNormalContainer[["capabilityAnalysis_nonNormalCapabilityAnalysis_overallCapabilityNonNormal"]][["data"]][[1]]
+    pBelowLsl <- farLslCdf(distribution, farLslCase$lsl, fit[["beta"]], fit[["theta"]], fit[["threshold"]], lower.tail = TRUE)
+    pAboveLsl <- farLslCdf(distribution, farLslCase$lsl, fit[["beta"]], fit[["theta"]], fit[["threshold"]], lower.tail = FALSE)
+    zLsl <- if (pAboveLsl < pBelowLsl) qnorm(pAboveLsl, lower.tail = FALSE) else qnorm(pBelowLsl)
+    expect_gt(abs(zLsl), 8.5)
+    expect_true(is.finite(performance[["ppl"]]))
+    expect_true(is.finite(performance[["ppk"]]))
+    # table values are rounded to .numDecimals (at least 2) before they are returned
+    expect_lt(abs(performance[["ppl"]] - (-zLsl / 3)), 0.006)
+    expect_lt(abs(performance[["ppk"]] - (-zLsl / 3)), 0.006)
+  })
+}
