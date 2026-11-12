@@ -3794,8 +3794,8 @@ processCapabilityStudiesInternal <- function(jaspResults, dataset, options) {
     boxCox = jaspBase::BoxCox(x, lambda=lambda, shift=shift, continuityAdjustment=ca),
     boxCoxAuto = jaspBase::BoxCoxAuto(x, predictor=as.factor(group), shift=shift, method=method, continuityAdjustment=ca),
     yeoJohnson = jaspBase::YeoJohnson(x, lambda=lambda),
-    yeoJohnsonAuto = jaspBase::YeoJohnsonAuto(x),
-    johnson = jaspBase::Johnson(x)
+    yeoJohnsonAuto = .qcTransformObserved(x, jaspBase::YeoJohnsonAuto),
+    johnson = .qcTransformObserved(x, jaspBase::Johnson)
   )
 
   # some auto-transformations return meta-info about the applied transform
@@ -3810,6 +3810,17 @@ processCapabilityStudiesInternal <- function(jaspResults, dataset, options) {
   dataset <- cbind(dataset, extra)
 
   return(list(dataset=dataset, parameters=attr))
+}
+
+.qcTransformObserved <- function(x, autoTransform) {
+  # these auto-transformations estimate their parameters from all of x and do not skip missing values
+  # (e.g., unequal subgroup sizes in wide format), so fit them on the observed values only
+  observed <- !is.na(x)
+  yObserved <- autoTransform(x[observed])
+  y <- rep(NA_real_, length(x))
+  y[observed] <- yObserved
+  attributes(y) <- attributes(yObserved)
+  return(y)
 }
 
 
