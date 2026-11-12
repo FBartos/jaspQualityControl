@@ -4731,3 +4731,12 @@ for (farLslCase in farLslCases) {
     expect_lt(abs(performance[["ppk"]] - (-zLsl / 3)), 0.006)
   })
 }
+
+test_that("Normal quantile from tail probabilities keeps NA and support boundaries", {
+  normalQuantileFromTails <- jaspQualityControl:::.pcNormalQuantileFromTails
+  expect_identical(normalQuantileFromTails(NA_real_, NA_real_), NA_real_)
+  expect_identical(normalQuantileFromTails(0, 1), -Inf)
+  expect_identical(normalQuantileFromTails(1, 0), Inf)
+  expect_equal(normalQuantileFromTails(pnorm(-12), pnorm(12)), -12)
+  expect_equal(normalQuantileFromTails(pnorm(12), pnorm(-12)), 12)
+})
