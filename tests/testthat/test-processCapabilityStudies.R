@@ -4446,6 +4446,90 @@ test_that("Johnson works", {
                                              2.467))
 })
 
+.autoTransformMissingOptions <- function(transformation) {
+  options <- analysisOptions("processCapabilityStudies")
+  options$testSet <- "jaspDefault"
+  options$dataFormat <- "wideFormat"
+  options$measurementsWideFormat <- c("x1", "x2")
+  options$axisLabels <- ""
+  options$capabilityStudyType <- "normalCapabilityAnalysis"
+  options$controlChart <- FALSE
+  options$histogram <- FALSE
+  options$probabilityPlot <- FALSE
+  options$dataTransformation <- transformation
+  options$lowerSpecificationLimit <- TRUE
+  options$upperSpecificationLimit <- TRUE
+  options$lowerSpecificationLimitValue <- 1.5
+  options$upperSpecificationLimitValue <- 4.5
+  return(options)
+}
+
+.autoTransformMissingDataset <- data.frame(x1 = c(2.25, 2.87, 2.12, 4.39, 3, 2.13, 3.15, 3.39, 3.23, 2.48),
+                                           x2 = c(4.28, 3.06, 2.26, 1.4, 3.81, 2.68, 2.71, 3.61, 3.48, NA))
+
+test_that("Yeo-Johnson (Auto) estimates lambda from the observed values when some are missing", {
+  set.seed(1)
+  results <- runAnalysis("processCapabilityStudies", .autoTransformMissingDataset,
+                         .autoTransformMissingOptions("yeoJohnsonAuto"))
+
+  # lambda equals the estimate from the 19 observed values (was 5, the upper search bound)
+  lambdaTable <- results[["results"]][["dataTransformationContainer"]][["collection"]][["dataTransformationContainer_table"]][["data"]]
+  expect_equal(lambdaTable[[1]][["value"]], 0.834326789473786, tolerance = 1e-6)
+
+  table <- results[["results"]][["capabilityAnalysis"]][["collection"]][["capabilityAnalysis_normalCapabilityAnalysis"]][["collection"]][["capabilityAnalysis_normalCapabilityAnalysis_processSummaryTable"]][["data"]]
+  jaspTools::expect_equal_tables(table, list(1.376, 2.5730626505549, 19, 0.61549949134404, 3.772))
+})
+
+test_that("Box-Cox (Auto) with average moving range estimates lambda from the observed values when a row is missing", {
+  dataset <- .autoTransformMissingDataset
+  dataset[["x2"]][10] <- 2.9
+  dataset[3, ] <- NA
+  options <- .autoTransformMissingOptions("boxCoxAuto")
+  options$dataTransformationMethod <- "movingRange"
+
+  set.seed(1)
+  results <- runAnalysis("processCapabilityStudies", dataset, options)
+
+  # lambda equals the estimate from the 18 observed values (was 5, the upper search bound)
+  lambdaTable <- results[["results"]][["dataTransformationContainer"]][["collection"]][["dataTransformationContainer_table"]][["data"]]
+  expect_equal(lambdaTable[[1]][["value"]], 0.868133925330921, tolerance = 1e-6)
+
+  table <- results[["results"]][["capabilityAnalysis"]][["collection"]][["capabilityAnalysis_normalCapabilityAnalysis"]][["collection"]][["capabilityAnalysis_normalCapabilityAnalysis_processSummaryTable"]][["data"]]
+  jaspTools::expect_equal_tables(table, list(1.422, 2.6206729158624, 18, 0.561047687832225, 0.58585357062183, 3.69))
+})
+
+test_that("Auto transformations keep missing values in place and fit on the observed values", {
+  x <- c(.autoTransformMissingDataset[["x1"]], .autoTransformMissingDataset[["x2"]])
+  x <- c(NA, x[1:9], NA, x[10:19]) # missing values at the start, in the middle and at the end
+  observed <- !is.na(x)
+
+  for (autoTransform in list(jaspBase::YeoJohnsonAuto, jaspBase::Johnson)) {
+    y <- jaspQualityControl:::.qcTransformObserved(x, autoTransform)
+    expected <- autoTransform(x[observed])
+    expect_identical(is.na(y), !observed)
+    expect_identical(as.vector(y[observed]), as.vector(expected))
+    expect_identical(attributes(y), attributes(expected))
+
+    # without missing values the result equals the plain transformation
+    xComplete <- x[observed]
+    expect_identical(jaspQualityControl:::.qcTransformObserved(xComplete, autoTransform), autoTransform(xComplete))
+  }
+})
+
+test_that("Johnson works when some values are missing", {
+  set.seed(1)
+  results <- runAnalysis("processCapabilityStudies", .autoTransformMissingDataset,
+                         .autoTransformMissingOptions("johnson"))
+
+  expect_equal(results[["status"]], "complete")
+  parameterTable <- results[["results"]][["dataTransformationContainer"]][["collection"]][["dataTransformationContainer_table"]][["data"]]
+  jaspTools::expect_equal_tables(parameterTable, list("\\(\\eta\\)", 1.15609019835732, "\\(\\gamma\\)", 0.0417037598940007,
+                                                      "\\(\\lambda\\)", 3.60503199736304, "\\(\\epsilon\\)", 1.1283881552308))
+
+  table <- results[["results"]][["capabilityAnalysis"]][["collection"]][["capabilityAnalysis_normalCapabilityAnalysis"]][["collection"]][["capabilityAnalysis_normalCapabilityAnalysis_processSummaryTable"]][["data"]]
+  jaspTools::expect_equal_tables(table, list(-2.459, 0.0955055205188693, 19, 1.2547162334239, 3.129))
+})
+
 test_that("Thin x-axis labels snapshot matches", {
   values <- 38 + qnorm(ppoints(100), sd = 0.004)
   values[length(values)] <- 38.012
